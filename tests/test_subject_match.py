@@ -71,7 +71,7 @@ class _Query:
                 and "definition" in str(self.select_columns)
             ):
                 raise Exception(
-                    "Could not find the 'definition' column of 'subjects_test' in the schema cache"
+                    "{'message': 'column subjects_test.definition does not exist', 'code': '42703'}"
                 )
             rows = self.client.select_rows(self.table, self.filters)
             if self.limit_n is not None:

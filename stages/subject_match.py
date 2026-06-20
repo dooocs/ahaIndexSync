@@ -200,10 +200,12 @@ def _confidence(term: _Term, field: str, subject_type: str) -> float:
 
 def _schema_cache_missing_column(exc: Exception, table: str, columns: tuple[str, ...]) -> bool:
     message = str(exc).lower()
+    table_name = table.lower()
+    mentions_column = any(column.lower() in message for column in columns)
     return (
-        table.lower() in message
-        and "schema cache" in message
-        and any(column.lower() in message for column in columns)
+        table_name in message
+        and mentions_column
+        and ("schema cache" in message or "does not exist" in message or "42703" in message)
     )
 
 
