@@ -19,9 +19,16 @@ class SubjectCandidate:
     type: str
     display_name: str
     description: str = ""
+    homepage_url: str = ""
+    aliases: list[str] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
+    evidence: dict = field(default_factory=dict)
     role: str = "mentioned"
     context: str = ""
+    reason: str = ""
+    confidence: float | None = None
+    proposed_by: str = "ai"
+    extractor_version: str = ""
 
 
 @dataclass

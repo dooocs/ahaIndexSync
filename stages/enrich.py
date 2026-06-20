@@ -9,8 +9,8 @@ Enrich 阶段：第二层内容增厚。
        - 单 item 内部顺序执行 enricher（cross_reference → hn_comments → github_ecosystem）
        - 每个 enricher 独立异常捕获，互不影响
   4. 收集到的 EnrichmentResult 批量写入 item_enrichments
-  5. 收集到的 SubjectCandidate 去重后写 subjects + subject_mentions
-  6. item 本身若是 GitHub repo，自动登记为 primary mention
+  5. 收集到的 SubjectCandidate 去重后，已知 subject 写 subject_mentions，未知 subject 进入 subject_candidates
+  6. item 本身若是 GitHub repo，自动登记为 primary mention 或候选
 
 两层保护：
   - 单 enricher 失败不影响其他 enricher 和其他 item
@@ -95,9 +95,10 @@ def _persist_enrichments(sb: Client, rows: list[dict], suffix: str) -> int:
 
 def _register_primary_subjects(
     registry: SubjectRegistry, items: list[dict], snapshot_date: str
-) -> int:
-    """item 本身是 GitHub repo 的，自动登记 primary mention。"""
-    ok = 0
+) -> tuple[int, int]:
+    """item 本身是 GitHub repo 的，已有 subject 写 mention，未知 subject 进候选。"""
+    mentions = 0
+    candidates = 0
     for it in items:
         repo = primary_github_repo_for_item(it)
         if not repo:
@@ -126,8 +127,34 @@ def _register_primary_subjects(
             display_name=display_name,
             description=(it.get("summary") or "")[:200],
             metadata=metadata,
+            auto_create_types=(),
         )
         if not sid:
+            cand = SubjectCandidate(
+                slug=slug,
+                type="project",
+                display_name=display_name,
+                description=(it.get("summary") or "")[:200],
+                metadata=metadata,
+                evidence={
+                    "source_url": it.get("original_url"),
+                    "repo_full_name": f"{owner}/{repo_name}",
+                },
+                role="primary",
+                context=(it.get("processed_title") or it.get("raw_title") or "")[:200],
+                reason="GitHub raw item primary subject",
+                proposed_by="rule",
+                extractor_version="enrich.primary_github_repo",
+            )
+            if registry.record_candidate(
+                cand,
+                item_id=it["item_id"],
+                snapshot_date=snapshot_date,
+                source_name=it.get("source_name"),
+                score=it.get("aha_index"),
+                extractor_version="enrich.primary_github_repo",
+            ):
+                candidates += 1
             continue
         if registry.record_mention(
             subject_id=sid,
@@ -137,18 +164,26 @@ def _register_primary_subjects(
             source_name=it.get("source_name"),
             score=it.get("aha_index"),
             context=(it.get("processed_title") or it.get("raw_title") or "")[:200],
+            detected_by="enrich.primary_github_repo",
+            confidence=1.0,
+            evidence={
+                "source_url": it.get("original_url"),
+                "repo_full_name": f"{owner}/{repo_name}",
+                "metadata": metadata,
+            },
         ):
-            ok += 1
-    return ok
+            mentions += 1
+    return mentions, candidates
 
 
 def _register_candidate_subjects(
     registry: SubjectRegistry,
     outputs: list[_ItemOutput],
     snapshot_date: str,
-) -> int:
-    """Enricher 产出的 subject 候选批量 upsert 并建立 mention。"""
-    ok = 0
+) -> tuple[int, int]:
+    """Enricher 产出的 subject 候选：已有 subject 写 mention，未知进入审核队列。"""
+    mentions = 0
+    candidates = 0
     for out in outputs:
         for r in out.results:
             for cand in r.subject_candidates:
@@ -158,8 +193,18 @@ def _register_candidate_subjects(
                     display_name=cand.display_name,
                     description=cand.description,
                     metadata=cand.metadata,
+                    auto_create_types=(),
                 )
                 if not sid:
+                    if registry.record_candidate(
+                        cand,
+                        item_id=out.item_id,
+                        snapshot_date=snapshot_date,
+                        source_name=out.source_name,
+                        score=out.score,
+                        extractor_version=f"enrich.{r.enricher_name}",
+                    ):
+                        candidates += 1
                     continue
                 if registry.record_mention(
                     subject_id=sid,
@@ -169,9 +214,17 @@ def _register_candidate_subjects(
                     source_name=out.source_name,
                     score=out.score,
                     context=cand.context,
+                    detected_by=f"enrich.{r.enricher_name}",
+                    confidence=cand.confidence,
+                    evidence={
+                        "candidate_key": f"{cand.type}:{cand.slug}",
+                        "reason": cand.reason,
+                        "metadata": cand.metadata,
+                        "proposed_by": cand.proposed_by,
+                    },
                 ):
-                    ok += 1
-    return ok
+                    mentions += 1
+    return mentions, candidates
 
 
 def run_enrich(
@@ -245,8 +298,17 @@ def run_enrich(
     written = _persist_enrichments(sb, enrichment_rows, table_suffix)
 
     registry = SubjectRegistry(sb, table_suffix)
-    primary_mentions = _register_primary_subjects(registry, items, snapshot_date)
-    candidate_mentions = _register_candidate_subjects(registry, outputs, snapshot_date)
+    primary_mentions, primary_candidates = _register_primary_subjects(registry, items, snapshot_date)
+    candidate_mentions, enriched_candidates = _register_candidate_subjects(registry, outputs, snapshot_date)
+    subject_candidates = primary_candidates + enriched_candidates
+    catalog_stats = {"mentions": 0, "matches": 0, "subjects_loaded": 0}
+    try:
+        from stages.subject_match import run_catalog_subject_match
+        catalog_stats = run_catalog_subject_match(
+            sb, config, items, registry, snapshot_date, table_suffix
+        )
+    except Exception as e:
+        print(f"  ⚠️ Catalog Subject 匹配阶段异常（跳过）: {e}")
 
     stats = {
         "items_total": len(items),
@@ -254,11 +316,19 @@ def run_enrich(
         "enrichments_written": written,
         "primary_mentions": primary_mentions,
         "candidate_mentions": candidate_mentions,
+        "primary_candidates": primary_candidates,
+        "enriched_candidates": enriched_candidates,
+        "subject_candidates": subject_candidates,
+        "catalog_subject_mentions": catalog_stats.get("mentions", 0),
+        "catalog_subject_matches": catalog_stats.get("matches", 0),
+        "catalog_subjects_loaded": catalog_stats.get("subjects_loaded", 0),
         "timed_out": timed_out,
     }
     print(
         f"📊 Enrich 完成: processed={stats['items_processed']}/{stats['items_total']} "
         f"enrichments={written} primary_mentions={primary_mentions} "
-        f"candidate_mentions={candidate_mentions} timed_out={timed_out}"
+        f"candidate_mentions={candidate_mentions} subject_candidates={subject_candidates} "
+        f"catalog_mentions={stats['catalog_subject_mentions']} "
+        f"timed_out={timed_out}"
     )
     return stats

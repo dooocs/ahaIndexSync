@@ -50,7 +50,18 @@ def run_pipeline(
     tracker = RunTracker(sb, run_type=mode, table_suffix=table_suffix)
     tracker.start_run(config.to_snapshot())
 
-    stats = {"scraped": 0, "fetched_content": 0, "processed": 0, "coarse_survived": 0, "enriched": 0, "ranked": 0, "archived": 0, "aggregated": 0, "errors": 0}
+    stats = {
+        "scraped": 0,
+        "fetched_content": 0,
+        "processed": 0,
+        "coarse_survived": 0,
+        "enriched": 0,
+        "ranked": 0,
+        "archived": 0,
+        "subject_insights": 0,
+        "aggregated": 0,
+        "errors": 0,
+    }
 
     # 计算 snapshot_date 供各 stage 使用
     from infra.time_utils import get_today_str
@@ -136,6 +147,18 @@ def run_pipeline(
             archive_stats = run_archive(sb, config)
             stats["archived"] = archive_stats.get("daily", 0)
 
+            # Stage 5.5: Subject Insights (only for production runs)
+            print(f"\n{'─' * 40}")
+            print("🧭 Stage 5.5: Subject Insights")
+            print(f"{'─' * 40}")
+            try:
+                from stages.subject_insights import run_subject_insights
+                insights_stats = run_subject_insights(sb, config, snapshot_date_str)
+                stats["subject_insights"] = insights_stats.get("written", 0)
+                stats["subject_insights_failed"] = insights_stats.get("failed", 0)
+            except Exception as e:
+                print(f"⚠️ Subject Insights 阶段异常（跳过）: {e}")
+
             # Stage 6: Aggregate Projects (only for production runs)
             print(f"\n{'─' * 40}")
             print("📊 Stage 6: Aggregate Projects")
@@ -159,5 +182,6 @@ def run_pipeline(
           f"fetched={stats['fetched_content']} processed={stats['processed']} "
           f"coarse={stats['coarse_survived']} enriched={stats['enriched']} "
           f"ranked={stats['ranked']} archived={stats['archived']} "
+          f"subject_insights={stats['subject_insights']} "
           f"aggregated={stats['aggregated']} errors={stats['errors']}")
     print(f"{'═' * 60}\n")

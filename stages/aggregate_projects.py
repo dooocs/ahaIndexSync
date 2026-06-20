@@ -51,7 +51,41 @@ def _load_existing_track_assignments(sb: Client) -> dict[str, str]:
         if len(batch) < page_size:
             break
         offset += page_size
+
+    # subject_tracks 是新的可审计分配层，优先级高于 project_heatmap_data 的缓存。
+    try:
+        track_rows = (
+            sb.table("subject_tracks")
+            .select("subject_id, track_id")
+            .eq("is_primary", True)
+            .is_("valid_to", "null")
+            .execute()
+            .data
+            or []
+        )
+        for r in track_rows:
+            existing[r["subject_id"]] = r["track_id"]
+    except Exception as e:
+        print(f"  ⚠️ 读取 subject_tracks 失败: {e}")
+
     return existing
+
+
+def _load_subject_stats(sb: Client) -> dict[str, dict]:
+    """读取 subject_stats 视图，拿到去重后的 mention/时间范围统计。"""
+    try:
+        rows = (
+            sb.table("subject_stats")
+            .select("subject_id, mention_count, first_seen_at, last_seen_at, item_count")
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        print(f"  ⚠️ 读取 subject_stats 失败: {e}")
+        return {}
+
+    return {r["subject_id"]: r for r in rows}
 
 
 def _match_subjects_via_llm(
@@ -338,6 +372,18 @@ def run_aggregate_projects(sb: Client, today: str) -> dict:
 
     subjects = _load_all_subjects(sb)
     print(f"  加载 subjects (project): {len(subjects)}")
+
+    subject_stats = _load_subject_stats(sb)
+    if subject_stats:
+        for subject in subjects:
+            stat = subject_stats.get(subject["id"])
+            if not stat:
+                continue
+            subject["mention_count"] = stat.get("mention_count", subject.get("mention_count"))
+            subject["first_seen_at"] = stat.get("first_seen_at") or subject.get("first_seen_at")
+            subject["last_seen_at"] = stat.get("last_seen_at") or subject.get("last_seen_at")
+            subject["item_count"] = stat.get("item_count")
+        print(f"  合并 subject_stats: {len(subject_stats)}")
 
     mentions = _load_all_mentions(sb)
     print(f"  加载 subject_mentions: {len(mentions)}")

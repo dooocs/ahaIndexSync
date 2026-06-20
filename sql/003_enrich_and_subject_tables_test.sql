@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS subject_mentions_test (
     source_name TEXT,
     score FLOAT,
     context TEXT,
+    detected_by TEXT,
+    confidence DOUBLE PRECISION,
+    evidence JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

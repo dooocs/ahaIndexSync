@@ -317,6 +317,7 @@ INSERT INTO display_metrics_configs (content_type, metrics) VALUES
 ('repo', '[{"label":"⭐ Stars","key":"stars","format":"number"},{"label":"📅 创建","key":"created_at","format":"days_ago"}]'),
 ('article', '[{"label":"📅 发布","key":"published_at","format":"date"}]'),
 ('tweet', '[{"label":"❤️ 点赞","key":"likes","format":"number"},{"label":"🔁 转发","key":"retweets","format":"number"},{"label":"💬 回复","key":"replies","format":"number"}]'),
+('tweet_digest', '[{"label":"🐦 推文","key":"tweet_count","format":"number"},{"label":"❤️ 点赞","key":"likes","format":"number"},{"label":"🔁 转发","key":"retweets","format":"number"}]'),
 ('news', '[{"label":"▲ 热度","key":"score","format":"number"},{"label":"💬 评论","key":"comments","format":"number"}]');
 
 -- ── 6. content_fetch_rules ──────────────────────────────────

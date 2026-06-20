@@ -67,6 +67,32 @@ class CrossReferenceEnricher(BaseEnricher):
         if not subject_ids:
             return
 
+        try:
+            stats_rows = (
+                self.sb.table("subject_stats")
+                .select("subject_id, mention_count, first_seen_at, last_seen_at, item_count")
+                .in_("subject_id", subject_ids)
+                .execute()
+                .data
+                or []
+            )
+        except Exception as e:
+            print(f"  ⚠️ cross_reference preload subject_stats 失败: {e}")
+            stats_rows = []
+
+        stats_by_subject = {r["subject_id"]: r for r in stats_rows}
+        for slug, subj in list(self._subjects_by_slug.items()):
+            stat = stats_by_subject.get(subj["id"])
+            if not stat:
+                continue
+            self._subjects_by_slug[slug] = {
+                **subj,
+                "mention_count": stat.get("mention_count", subj.get("mention_count")),
+                "first_seen_at": stat.get("first_seen_at") or subj.get("first_seen_at"),
+                "last_seen_at": stat.get("last_seen_at") or subj.get("last_seen_at"),
+                "item_count": stat.get("item_count"),
+            }
+
         cutoff = (date.fromisoformat(snapshot_date) - timedelta(days=90)).isoformat()
         try:
             mentions = (

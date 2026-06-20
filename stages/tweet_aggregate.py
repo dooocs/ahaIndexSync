@@ -8,18 +8,20 @@ Twitter 推文聚合阶段
 
 from __future__ import annotations
 
-import hashlib
 from datetime import date
 
 from supabase import Client
 from pipeline.config_loader import PipelineConfig
-from infra.db import table_names, upsert_raw_item, get_supabase
+from infra.db import table_names, upsert_raw_item, upsert_content_initial
 from infra.models import RawItem
 
 
-def _aggregate_id(snapshot_date: str) -> str:
-    """确定性 ID：同一天的 digest 始终相同。"""
-    return hashlib.md5(f"tweet_digest:{snapshot_date}".encode()).hexdigest()
+def _twitter_scraper_snapshot(config: PipelineConfig) -> tuple[str, dict]:
+    """Return the source scraper slug/config used for the synthetic digest row."""
+    for sc in getattr(config, "scrapers", []) or []:
+        if sc.name == "X (Twitter)" or sc.scraper_type == "twitter_twscrape":
+            return sc.slug or "x-twitter-", sc.config or {}
+    return "x-twitter-", {}
 
 
 def run_tweet_aggregate(
@@ -35,7 +37,7 @@ def run_tweet_aggregate(
     # 读取当天所有 tweet 类型的 raw_items
     rows = (
         sb.table(raw_table)
-        .select("*")
+        .select(f"*, {content_table}(raw_body)")
         .eq("snapshot_date", today_str)
         .eq("content_type", "tweet")
         .execute()
@@ -80,11 +82,15 @@ def run_tweet_aggregate(
                 ext = json.loads(ext)
             except Exception:
                 ext = {}
+        content = r.get(content_table) or {}
+        if isinstance(content, list):
+            content = content[0] if content else {}
+        text = content.get("raw_body") or r.get("title", "")
 
         tweets.append({
             "author": r.get("author", ""),
             "display_name": ext.get("display_name", ""),
-            "text": r.get("title", ""),  # title 是推文前 100 字
+            "text": text,
             "likes": likes,
             "retweets": retweets,
             "url": r.get("original_url", ""),
@@ -100,25 +106,13 @@ def run_tweet_aggregate(
     title = f"{author_str} 等 {len(tweets)} 条推文热议"
 
     # 构造 digest item
-    digest_id = _aggregate_id(today_str)
     body_text = "\n\n".join(
         f"@{t['author']}: {t['text']}" for t in tweets
     )
 
-    # 删除原始 tweet items
-    tweet_ids = [r["id"] for r in rows]
-    if tweet_ids:
-        # 分批删除（Supabase 限制）
-        batch_size = 100
-        for i in range(0, len(tweet_ids), batch_size):
-            batch = tweet_ids[i:i + batch_size]
-            sb.table(raw_table).delete().in_("id", batch).execute()
-        # 同时删除 items_content 中的对应记录
-        for i in range(0, len(tweet_ids), batch_size):
-            batch = tweet_ids[i:i + batch_size]
-            sb.table(content_table).delete().in_("item_id", batch).execute()
-
-    # 插入聚合后的 digest
+    # 插入聚合后的 digest，并同步写入 items_content。
+    # Stage 2 通过 raw_items JOIN items_content 查待处理项；缺少 content 记录会导致 digest 永远不进入展示链路。
+    scraper_slug, scraper_config_snapshot = _twitter_scraper_snapshot(config)
     digest = RawItem(
         title=title,
         original_url=f"tweet_digest://{today_str}",
@@ -139,8 +133,22 @@ def run_tweet_aggregate(
         },
         published_at=today,
         snapshot_date=today,
+        scraper_slug=scraper_slug,
+        scraper_config_snapshot=scraper_config_snapshot,
     )
     upsert_raw_item(digest, raw_table)
+    upsert_content_initial(digest.id, digest.body_text, content_table)
+
+    # digest 写入成功后再删除原始 tweet，避免约束或网络错误导致原文先丢失。
+    tweet_ids = [r["id"] for r in rows]
+    if tweet_ids:
+        batch_size = 100
+        for i in range(0, len(tweet_ids), batch_size):
+            batch = tweet_ids[i:i + batch_size]
+            sb.table(raw_table).delete().in_("id", batch).execute()
+        for i in range(0, len(tweet_ids), batch_size):
+            batch = tweet_ids[i:i + batch_size]
+            sb.table(content_table).delete().in_("item_id", batch).execute()
 
     print(f"  🐦 聚合 {len(tweets)} 条推文 → 1 条 digest（❤️ {total_likes} 🔁 {total_retweets}）")
-    return {"aggregated": len(tweets), "digest_id": digest_id}
+    return {"aggregated": len(tweets), "digest_id": digest.id}
