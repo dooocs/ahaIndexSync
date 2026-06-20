@@ -45,6 +45,25 @@ CREATE INDEX IF NOT EXISTS idx_subjects_test_type ON subjects_test (type);
 CREATE INDEX IF NOT EXISTS idx_subjects_test_last_seen ON subjects_test (last_seen_at DESC);
 CREATE INDEX IF NOT EXISTS idx_subjects_test_mention_count ON subjects_test (mention_count DESC);
 
+-- Existing _test tables may have been created before subject catalog fields
+-- and mention provenance fields existed. Keep this file re-runnable.
+ALTER TABLE IF EXISTS subjects_test
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS directory_visible BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS section_slug TEXT,
+    ADD COLUMN IF NOT EXISTS curation_priority INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT 'pipeline',
+    ADD COLUMN IF NOT EXISTS definition TEXT,
+    ADD COLUMN IF NOT EXISTS homepage_url TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_subjects_test_directory_visible
+    ON subjects_test (directory_visible, curation_priority DESC, display_name)
+    WHERE directory_visible = true;
+
+CREATE INDEX IF NOT EXISTS idx_subjects_test_section_slug
+    ON subjects_test (section_slug, curation_priority DESC)
+    WHERE directory_visible = true;
+
 
 -- 3. subject_mentions_test
 CREATE TABLE IF NOT EXISTS subject_mentions_test (
@@ -67,6 +86,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_subject_mentions_test_key
 CREATE INDEX IF NOT EXISTS idx_subject_mentions_test_subject ON subject_mentions_test (subject_id, snapshot_date DESC);
 CREATE INDEX IF NOT EXISTS idx_subject_mentions_test_item ON subject_mentions_test (item_id, snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_subject_mentions_test_date ON subject_mentions_test (snapshot_date);
+
+ALTER TABLE IF EXISTS subject_mentions_test
+    ADD COLUMN IF NOT EXISTS detected_by TEXT,
+    ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION,
+    ADD COLUMN IF NOT EXISTS evidence JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 
 -- 4. subject_aliases_test

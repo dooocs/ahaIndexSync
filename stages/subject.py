@@ -23,6 +23,15 @@ from infra.time_utils import get_today_str
 _cache_lock = threading.Lock()
 
 
+def _schema_cache_missing_column(exc: Exception, table: str, columns: tuple[str, ...]) -> bool:
+    message = str(exc).lower()
+    return (
+        table.lower() in message
+        and "schema cache" in message
+        and any(column.lower() in message for column in columns)
+    )
+
+
 class SubjectRegistry:
     """在一次 Enrich 运行内缓存 slug → subject_id，避免重复 upsert。"""
 
@@ -202,8 +211,26 @@ class SubjectRegistry:
                 mention_row, on_conflict="subject_id,item_id,snapshot_date"
             ).execute()
         except Exception as e:
-            print(f"  ⚠️ 写入 subject_mention 失败 {subject_id}/{item_id}: {e}")
-            return False
+            if self._is_test_tables and _schema_cache_missing_column(
+                e,
+                self._subject_mentions_table,
+                ("detected_by", "confidence", "evidence"),
+            ):
+                legacy_row = {
+                    key: value
+                    for key, value in mention_row.items()
+                    if key not in ("detected_by", "confidence", "evidence")
+                }
+                try:
+                    self.sb.table(self._subject_mentions_table).upsert(
+                        legacy_row, on_conflict="subject_id,item_id,snapshot_date"
+                    ).execute()
+                except Exception as legacy_error:
+                    print(f"  ⚠️ 写入 subject_mention 失败 {subject_id}/{item_id}: {legacy_error}")
+                    return False
+            else:
+                print(f"  ⚠️ 写入 subject_mention 失败 {subject_id}/{item_id}: {e}")
+                return False
 
         if mention_is_new is None:
             return True

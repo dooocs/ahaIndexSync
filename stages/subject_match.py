@@ -22,6 +22,12 @@ from stages.subject import SubjectRegistry
 
 DETECTED_BY = "enrich.catalog_subject_match"
 
+_CATALOG_SUBJECT_COLUMNS = (
+    "id, slug, type, display_name, aliases, description, definition, homepage_url, "
+    "metadata, status, directory_visible, section_slug, curation_priority"
+)
+_LEGACY_TEST_SUBJECT_COLUMNS = "id, slug, type, display_name, aliases, description, metadata"
+
 _STOP_TERMS = {
     "ai",
     "ml",
@@ -192,15 +198,21 @@ def _confidence(term: _Term, field: str, subject_type: str) -> float:
     return round(max(0.0, min(0.98, score)), 2)
 
 
+def _schema_cache_missing_column(exc: Exception, table: str, columns: tuple[str, ...]) -> bool:
+    message = str(exc).lower()
+    return (
+        table.lower() in message
+        and "schema cache" in message
+        and any(column.lower() in message for column in columns)
+    )
+
+
 def _load_visible_subjects(sb: Client, table_suffix: str, limit: int) -> list[dict[str, Any]]:
     _, subjects_table, _, _ = enrich_table_names(table_suffix)
     try:
         rows = (
             sb.table(subjects_table)
-            .select(
-                "id, slug, type, display_name, aliases, description, definition, homepage_url, "
-                "metadata, status, directory_visible, section_slug, curation_priority"
-            )
+            .select(_CATALOG_SUBJECT_COLUMNS)
             .eq("status", "active")
             .eq("directory_visible", True)
             .limit(limit)
@@ -209,8 +221,34 @@ def _load_visible_subjects(sb: Client, table_suffix: str, limit: int) -> list[di
             or []
         )
     except Exception as e:
-        print(f"  ⚠️ catalog subject 加载失败: {e}")
-        return []
+        if table_suffix and _schema_cache_missing_column(
+            e,
+            subjects_table,
+            (
+                "definition",
+                "homepage_url",
+                "status",
+                "directory_visible",
+                "section_slug",
+                "curation_priority",
+                "created_by",
+            ),
+        ):
+            try:
+                rows = (
+                    sb.table(subjects_table)
+                    .select(_LEGACY_TEST_SUBJECT_COLUMNS)
+                    .limit(limit)
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception as legacy_error:
+                print(f"  ⚠️ catalog subject 加载失败: {legacy_error}")
+                return []
+        else:
+            print(f"  ⚠️ catalog subject 加载失败: {e}")
+            return []
 
     subjects = []
     for row in rows:

@@ -91,6 +91,15 @@ class _Query:
                 row.update(self.payload)
             return _Result(rows)
         if self.operation == "upsert":
+            if (
+                self.client.raise_legacy_test_mention_schema
+                and self.table == "subject_mentions_test"
+                and isinstance(self.payload, dict)
+                and any(key in self.payload for key in ("detected_by", "confidence", "evidence"))
+            ):
+                raise Exception(
+                    "Could not find the 'confidence' column of 'subject_mentions_test' in the schema cache"
+                )
             row = dict(self.payload)
             conflict = self.upsert_kwargs.get("on_conflict", "")
             keys = [k.strip() for k in conflict.split(",") if k.strip()]
@@ -123,6 +132,7 @@ class _FakeSupabase:
         }
         self.operations = []
         self.rpc_calls = []
+        self.raise_legacy_test_mention_schema = False
 
     def table(self, name):
         return _Query(self, name)
@@ -361,6 +371,43 @@ class TestSubjectCandidates(unittest.TestCase):
         self.assertEqual(mention["detected_by"], "enrich.primary_github_repo")
         self.assertEqual(mention["confidence"], 1.0)
         self.assertEqual(mention["evidence"], {"source_url": "https://github.com/owner/repo"})
+
+    def test_record_mention_retries_legacy_test_schema_without_provenance_columns(self):
+        sb = _FakeSupabase()
+        sb.raise_legacy_test_mention_schema = True
+        sb.tables["subjects_test"].append(
+            {
+                "id": "subject-test-1",
+                "slug": "github:owner/repo",
+                "type": "project",
+                "display_name": "owner/repo",
+                "metadata": {"repo_full_name": "owner/repo"},
+                "mention_count": 5,
+                "last_seen_at": "2026-06-18",
+            }
+        )
+        registry = SubjectRegistry(sb, "_test")
+
+        written = registry.record_mention(
+            subject_id="subject-test-1",
+            item_id="item-1",
+            snapshot_date="2026-06-20",
+            role="primary",
+            source_name="GitHub Trending",
+            score=0.91,
+            context="primary repo mention",
+            detected_by="enrich.primary_github_repo",
+            confidence=1.0,
+            evidence={"source_url": "https://github.com/owner/repo"},
+        )
+
+        self.assertTrue(written)
+        self.assertEqual(len(sb.tables["subject_mentions_test"]), 1)
+        mention = sb.tables["subject_mentions_test"][0]
+        self.assertNotIn("detected_by", mention)
+        self.assertNotIn("confidence", mention)
+        self.assertNotIn("evidence", mention)
+        self.assertEqual(sb.tables["subjects_test"][0]["mention_count"], 6)
 
 
 if __name__ == "__main__":

@@ -27,9 +27,11 @@ class _Query:
         self.filters = []
         self.limit_n = None
         self.upsert_kwargs = {}
+        self.select_columns = "*"
 
-    def select(self, *_args):
+    def select(self, columns="*"):
         self.operation = "select"
+        self.select_columns = columns
         return self
 
     def insert(self, payload):
@@ -62,6 +64,15 @@ class _Query:
 
     def execute(self):
         if self.operation == "select":
+            self.client.select_calls.append((self.table, self.select_columns, list(self.filters)))
+            if (
+                self.client.raise_legacy_subject_schema
+                and self.table == "subjects_test"
+                and "definition" in str(self.select_columns)
+            ):
+                raise Exception(
+                    "Could not find the 'definition' column of 'subjects_test' in the schema cache"
+                )
             rows = self.client.select_rows(self.table, self.filters)
             if self.limit_n is not None:
                 rows = rows[: self.limit_n]
@@ -109,7 +120,12 @@ class _FakeSupabase:
             "subject_aliases": [],
             "subjects": [],
             "subject_mentions": [],
+            "subject_aliases_test": [],
+            "subjects_test": [],
+            "subject_mentions_test": [],
         }
+        self.select_calls = []
+        self.raise_legacy_subject_schema = False
 
     def table(self, name):
         return _Query(self, name)
@@ -205,6 +221,52 @@ class TestSubjectMatch(unittest.TestCase):
         )
         self.assertEqual(len(sb.tables["subject_mentions"]), 1)
         self.assertEqual(sb.tables["subjects"][0]["mention_count"], 1)
+
+    def test_test_subject_match_falls_back_for_legacy_catalog_schema(self):
+        sb = _FakeSupabase()
+        sb.raise_legacy_subject_schema = True
+        sb.tables["subjects_test"] = [
+            {
+                "id": "subject-openai",
+                "slug": "company:openai",
+                "type": "company",
+                "display_name": "OpenAI",
+                "aliases": ["OpenAI"],
+                "description": "AI lab",
+                "metadata": {},
+                "mention_count": 0,
+                "last_seen_at": "2026-06-19",
+            }
+        ]
+        items = [
+            {
+                "item_id": "item-openai",
+                "processed_title": "OpenAI 发布新模型",
+                "summary": "OpenAI 推出新的推理模型。",
+                "tags": ["OpenAI"],
+                "keywords": ["OpenAI"],
+                "source_name": "AI Blog",
+                "original_url": "https://example.com/openai",
+                "aha_index": 0.91,
+            }
+        ]
+
+        registry = SubjectRegistry(sb, "_test")
+        stats = run_catalog_subject_match(
+            sb,
+            PipelineConfig(params={"subject_match_min_confidence": 0.65}),
+            items,
+            registry,
+            "2026-06-20",
+            "_test",
+        )
+
+        self.assertEqual(stats["mentions"], 1)
+        self.assertEqual(len(sb.tables["subject_mentions_test"]), 1)
+        self.assertIn(
+            ("subjects_test", "id, slug, type, display_name, aliases, description, metadata", []),
+            sb.select_calls,
+        )
 
 
 if __name__ == "__main__":
