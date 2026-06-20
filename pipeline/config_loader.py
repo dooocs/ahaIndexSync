@@ -6,7 +6,9 @@ Pipeline 启动时调用一次，整个运行周期使用同一份配置。
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
+from typing import Any, Callable
 from supabase import Client
 
 
@@ -109,10 +111,27 @@ class PipelineConfig:
         }
 
 
+def _select_rows(label: str, build_query: Callable[[], Any], attempts: int = 5) -> list[dict]:
+    delay = 1.0
+    for attempt in range(1, attempts + 1):
+        try:
+            return build_query().execute().data or []
+        except Exception as exc:
+            if attempt == attempts:
+                raise
+            print(f"⚠️ 配置读取失败 [{label}] {attempt}/{attempts}: {exc}，{delay:.1f}s 后重试")
+            time.sleep(delay)
+            delay *= 2
+    return []
+
+
 def load_config(sb: Client) -> PipelineConfig:
     cfg = PipelineConfig()
 
-    rows = sb.table("scraper_configs").select("*").eq("enabled", True).order("priority").execute().data or []
+    rows = _select_rows(
+        "scraper_configs",
+        lambda: sb.table("scraper_configs").select("*").eq("enabled", True).order("priority"),
+    )
     cfg.scrapers = [
         ScraperConfig(
             id=r["id"], scraper_type=r["scraper_type"], name=r["name"],
@@ -124,7 +143,10 @@ def load_config(sb: Client) -> PipelineConfig:
         for r in rows
     ]
 
-    rows = sb.table("prompt_templates").select("*").eq("enabled", True).execute().data or []
+    rows = _select_rows(
+        "prompt_templates",
+        lambda: sb.table("prompt_templates").select("*").eq("enabled", True),
+    )
     cfg.prompts = {
         r["name"]: PromptConfig(
             name=r["name"], stage=r["stage"], template=r["template"],
@@ -135,7 +157,10 @@ def load_config(sb: Client) -> PipelineConfig:
         for r in rows
     }
 
-    rows = sb.table("rank_group_configs").select("*").eq("enabled", True).order("sort_order").execute().data or []
+    rows = _select_rows(
+        "rank_group_configs",
+        lambda: sb.table("rank_group_configs").select("*").eq("enabled", True).order("sort_order"),
+    )
     cfg.rank_groups = [
         RankGroupConfig(
             group_name=r["group_name"], source_names=r["source_names"],
@@ -144,19 +169,31 @@ def load_config(sb: Client) -> PipelineConfig:
         for r in rows
     ]
 
-    rows = sb.table("tag_slot_configs").select("*").eq("enabled", True).execute().data or []
+    rows = _select_rows(
+        "tag_slot_configs",
+        lambda: sb.table("tag_slot_configs").select("*").eq("enabled", True),
+    )
     cfg.tag_slots = [TagSlotConfig(tag_name=r["tag_name"], max_slots=r["max_slots"], min_score=r["min_score"]) for r in rows]
 
-    rows = sb.table("pipeline_params").select("*").execute().data or []
+    rows = _select_rows(
+        "pipeline_params",
+        lambda: sb.table("pipeline_params").select("*"),
+    )
     cfg.params = {r["key"]: r["value"] for r in rows}
 
-    rows = sb.table("display_metrics_configs").select("*").execute().data or []
+    rows = _select_rows(
+        "display_metrics_configs",
+        lambda: sb.table("display_metrics_configs").select("*"),
+    )
     cfg.display_metrics = {
         r["content_type"]: r["metrics"] if isinstance(r["metrics"], list) else json.loads(r["metrics"])
         for r in rows
     }
 
-    rows = sb.table("content_fetch_rules").select("*").eq("enabled", True).execute().data or []
+    rows = _select_rows(
+        "content_fetch_rules",
+        lambda: sb.table("content_fetch_rules").select("*").eq("enabled", True),
+    )
     cfg.fetch_rules = [ContentFetchRule(rule_type=r["rule_type"], value=r["value"]) for r in rows]
 
     print(f"📋 配置加载完成: {len(cfg.scrapers)} scrapers, {len(cfg.prompts)} prompts, "

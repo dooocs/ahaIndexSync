@@ -40,7 +40,7 @@ class AIBlogEngine(BaseScraper):
         link_selector = self.config.get("link_selector", "a[href*='/news/']")
         author = self.config.get("author", "")
         source_tag = self.config.get("source_tag", "official_ai")
-        fetch_window = self.config.get("fetch_window_hours", 0)
+        fetch_window = int(self.config.get("fetch_window_hours", 25) or 0)
 
         cutoff = None
         if fetch_window:
