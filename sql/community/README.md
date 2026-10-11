@@ -47,10 +47,32 @@ Deploy `supabase/functions/meet-photos` and `meet-photo-cleanup` with the checke
 function config. The upload endpoint validates user JWTs itself; cleanup validates
 its cron secret. Never expose either service credentials or the cleanup secret.
 
-Photos are private, optional, and limited to three per post. The authenticated
+Photos are private, optional, and limited to six per post. The authenticated
 author can preview drafts; other verified users can view only live approved posts.
 The SQL wrapper associates photos atomically and resets review on edits. Operators
 must inspect private Storage images alongside text before setting `published`.
+
+Apply `008_direct_photo_upload.sql` after the earlier migrations. It grants
+authenticated users a scoped, short-lived INSERT path for their own reserved
+objects, while retaining private reads and manual review. Browsers encode a
+main JPEG and thumbnail and send both directly to Storage; they then mark their
+metadata row ready. The bucket remains private, JPEG-only and 1 MiB/object.
+The SQL submission wrapper checks that both Storage objects exist. The browser
+cannot overwrite or delete Storage objects directly, and cannot update ready
+metadata. At most six photos can be attached to a post; twelve total metadata
+rows allow replacement while editing a six-photo post. Existing cleanup still
+needs a working scheduled invocation for abandoned reservations.
+
+For an existing Aliyun instance, generate only the incremental compatible SQL:
+
+```sh
+node sql/community/build-aliyun-photo-update.mjs
+```
+
+Run the generated `008_direct_photo_upload_aliyun.sql` once in that project's
+SQL Editor. Do not reapply the full generated installation or point this at the
+news database. Verify the direct authenticated Storage upload before releasing
+the frontend.
 
 Set `COMMUNITY_CLEANUP_SECRET` in Edge secrets, then use the server-only
 `configure_meet_photo_cleanup(secret, url)` RPC to store it in Vault and schedule
@@ -64,6 +86,23 @@ expiry, UI behavior and verification. ImageMagick is pinned to 0.0.44; its WASM
 binary lives under `dist/x86/`, not the path in older Supabase examples.
 
 ## Aliyun target
+
+### Chinese email templates
+
+`email-templates.mjs` defines Chinese subjects and HTML bodies for all 13 Auth
+email types, including verification, sign-in, invitations and security notices.
+Apply `communityEmailSettings()` with the target's authenticated
+`PATCH /auth/v1/modify/settings` endpoint, then read back every changed field.
+The payload changes only subjects and bodies: it does not contain SMTP
+credentials, enable new email notifications, or bypass email verification.
+Keep the generated `{{ .ConfirmationURL }}` intact for link-based sign-in;
+reauthentication uses `{{ .Token }}`. A blank dashboard password input does not
+indicate that its write-only SMTP password is missing.
+
+Run `node --test sql/community/email-templates.test.mjs` before applying the
+templates. SMTP API acceptance is not proof of receipt; verify a real Chinese
+email and the browser callback separately. Never commit a real confirmation
+link, OTP, session, or SMTP authorization code.
 
 For a fresh Aliyun project, run `aliyun-preflight.sql` first. It reads metadata
 only, including API role timeout settings and extension availability. Do not

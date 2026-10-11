@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const files = ['001_community_mvp.sql','002_community_photos.sql','aliyun-cleanup.sql',
-  '004_photo_consent.sql','005_private_review.sql','006_review_conflict.sql'];
+  '004_photo_consent.sql','005_private_review.sql','006_review_conflict.sql','008_direct_photo_upload.sql'];
 const bodies = [];
 for (const file of files) {
   const source = await readFile(join(directory,file),'utf8');
