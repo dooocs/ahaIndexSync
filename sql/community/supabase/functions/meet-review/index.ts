@@ -52,7 +52,7 @@ Deno.serve(async req => {
       if (!data) return reply({ error: 'post_missing' }, 404);
       const snapshot = data.snapshot;
       const rows = snapshot.photos;
-      if (rows.some((row: { state: string }) => row.state !== 'ready') || rows.length > 3) return reply({ error: 'photos_not_ready' }, 409);
+      if (rows.some((row: { state: string }) => row.state !== 'ready') || rows.length > 6) return reply({ error: 'photos_not_ready' }, 409);
       const keys = rows.flatMap((row: { owner_id: string; id: string }) => paths(row.owner_id, row.id));
       const signed = keys.length ? await admin.storage.from(bucket).createSignedUrls(keys, 120) : { data: [], error: null };
       if (signed.error || signed.data?.some(row => row.error || !row.signedUrl)) throw signed.error || new Error('sign_failed');
