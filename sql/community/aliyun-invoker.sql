@@ -37,7 +37,8 @@ begin
         p_params->>'p_occupation',p_params->>'p_title',p_params->>'p_about',p_params->>'p_looking_for',
         p_params->>'p_contact',(p_params->>'p_consent')::boolean,(p_params->>'p_share_contact')::boolean,
         case when jsonb_typeof(p_params->'p_photo_ids')='array' then
-          array(select jsonb_array_elements_text(p_params->'p_photo_ids')::uuid) else null end));
+          array(select jsonb_array_elements_text(p_params->'p_photo_ids')::uuid) else null end,
+        coalesce((p_params->>'p_public_photos')::boolean,false)));
   end case;
   return v_result;
 end $$;

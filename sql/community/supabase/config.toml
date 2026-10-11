@@ -30,6 +30,9 @@ enable_signup = false
 [functions.meet-photos]
 verify_jwt = false # getUser validates the JWT and verified email inside the function.
 
+[functions.meet-public-photos]
+verify_jwt = false # Read-only signing of approved, unexpired, explicitly public photos.
+
 [functions.meet-photo-cleanup]
 verify_jwt = false # Private cron secret is checked inside the function.
 

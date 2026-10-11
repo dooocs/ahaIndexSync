@@ -47,7 +47,7 @@ Deploy `supabase/functions/meet-photos` and `meet-photo-cleanup` with the checke
 function config. The upload endpoint validates user JWTs itself; cleanup validates
 its cron secret. Never expose either service credentials or the cleanup secret.
 
-Photos are private, optional, and limited to six per post. The authenticated
+Photo objects stay private, are optional, and are limited to six per post. The authenticated
 author can preview drafts; other verified users can view only live approved posts.
 The SQL wrapper associates photos atomically and resets review on edits. Operators
 must inspect private Storage images alongside text before setting `published`.
@@ -73,6 +73,22 @@ Run the generated `008_direct_photo_upload_aliyun.sql` once in that project's
 SQL Editor. Do not reapply the full generated installation or point this at the
 news database. Verify the direct authenticated Storage upload before releasing
 the frontend.
+
+### Public photo viewing
+
+Apply `009_public_photo_consent.sql` and deploy `meet-public-photos` before
+releasing the public-photo UI. For an existing Aliyun instance, generate and run
+`009_public_photo_consent_aliyun.sql` with `node sql/community/build-aliyun-public-photos.mjs`.
+The new function is standalone TypeScript with no dependencies and may be pasted
+into the Dashboard editor under the exact name `meet-public-photos`.
+
+The read-only endpoint signs only ready photos from approved, unexpired posts
+with `2026-10-11-public-photos` consent. Storage stays private; owner previews and
+contacts retain their authenticated endpoints. Earlier posts keep their original
+photo audience until their author explicitly resubmits under the public-photo
+terms. Old cached clients do not opt in: the new submission includes an explicit
+`p_public_photos` flag. Redeploy `meet-review` with its six-photo limit as well.
+Run `node --experimental-strip-types --test sql/community/public-photos.test.mjs`.
 
 Set `COMMUNITY_CLEANUP_SECRET` in Edge secrets, then use the server-only
 `configure_meet_photo_cleanup(secret, url)` RPC to store it in Vault and schedule

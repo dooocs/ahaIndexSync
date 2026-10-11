@@ -10,10 +10,10 @@ const root = resolve(directory, '../..');
 const output = resolve(process.argv[2] || join(tmpdir(), 'amazingindex-community-code.tar.gz'));
 const files = [
   '001_community_mvp.sql', '002_community_photos.sql', '003_photo_cleanup_schedule.sql',
-  '004_photo_consent.sql', '005_private_review.sql', '006_review_conflict.sql', '008_direct_photo_upload.sql',
+  '004_photo_consent.sql', '005_private_review.sql', '006_review_conflict.sql', '008_direct_photo_upload.sql', '009_public_photo_consent.sql',
   '007_aliyun_cleanup_url.sql', 'aliyun-preflight.sql', 'aliyun-invoker.sql', 'aliyun-cleanup.sql', 'aliyun-runtime-assets.sql', 'build-aliyun.mjs', 'bundle-functions.mjs', 'tests.sql', 'photos-tests.sql',
   'review-tests.sql', 'README.md', 'package-code.mjs', 'email-templates.mjs',
-  'email-templates.test.mjs', 'build-aliyun-photo-update.mjs', 'supabase/config.toml',
+  'email-templates.test.mjs', 'public-photos.test.mjs', 'build-aliyun-photo-update.mjs', 'build-aliyun-public-photos.mjs', 'supabase/config.toml',
   'supabase/functions/_shared/gateway-config.ts',
   'supabase/functions/_shared/gateway-config.test.ts',
   'supabase/functions/_shared/request-authorization.ts',
@@ -22,6 +22,7 @@ const files = [
   'supabase/functions/_shared/runtime-wasm.ts','supabase/functions/_shared/runtime-wasm.test.ts',
   'supabase/functions/meet-photos/index.ts', 'supabase/functions/meet-photos/encode.ts',
   'supabase/functions/meet-photos/encode.test.ts',
+  'supabase/functions/meet-public-photos/index.ts',
   'supabase/functions/meet-photo-cleanup/index.ts',
   'supabase/functions/meet-review/index.ts', 'supabase/functions/meet-review/auth.ts',
   'supabase/functions/meet-review/auth.test.ts',
