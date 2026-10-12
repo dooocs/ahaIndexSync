@@ -23,12 +23,25 @@ class _Query:
         self.table = table
         self.operation = None
         self.payload = None
+        self.filters = []
 
     def select(self, *_args):
         self.operation = "select"
         return self
 
     def eq(self, *_args):
+        return self
+
+    def lt(self, column, value):
+        self.filters.append(("lt", column, value))
+        return self
+
+    @property
+    def not_(self):
+        return self
+
+    def is_(self, column, value):
+        self.filters.append(("not_is", column, value))
         return self
 
     def order(self, *_args, **_kwargs):
@@ -53,7 +66,7 @@ class _Query:
             self.client.tables.setdefault(self.table, []).extend(rows)
             return _Result(rows)
         if self.operation == "update":
-            self.client.writes.append((self.table, "update", self.payload, None))
+            self.client.writes.append((self.table, "update", self.payload, list(self.filters)))
             return _Result([])
         return _Result([])
 
@@ -161,9 +174,6 @@ class TestAggregateProjects(unittest.TestCase):
             "stages.aggregate_projects._load_existing_track_assignments",
             return_value={},
         ), patch(
-            "stages.aggregate_projects._load_existing_heatmap",
-            return_value={},
-        ), patch(
             "stages.aggregate_projects._match_subjects_via_llm",
             return_value={
                 "subject-1": ("track-1", "Foundation Models", "model"),
@@ -177,6 +187,14 @@ class TestAggregateProjects(unittest.TestCase):
         self.assertEqual(stats["rows_written_today"], 3)
         self.assertEqual(stats["tracks_matched"], 3)
         self.assertEqual(len(sb.tables["project_heatmap_data"]), 3)
+
+        # related_data is cleared from older rows with ONE request, never rewritten per subject
+        updates = [w for w in sb.writes if w[0] == "project_heatmap_data" and w[1] == "update"]
+        self.assertEqual(len(updates), 1)
+        _, _, payload, filters = updates[0]
+        self.assertEqual(payload, {"related_data": None})
+        self.assertIn(("lt", "snapshot_date", "2026-06-20"), filters)
+        self.assertIn(("not_is", "related_data", "null"), filters)
 
         row = next(r for r in sb.tables["project_heatmap_data"] if r["subject_slug"] == "github:alice/one")
         self.assertEqual(row["mention_count"], 2)

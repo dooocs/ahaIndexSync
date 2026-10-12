@@ -7,7 +7,7 @@ Project Heatmap 聚合阶段：在 archive 之后运行。
   2. 匹配 subject → track（使用 LLM 语义匹配）
   3. 计算关联项目（共现分析 + timeline）
   4. 计算竞品（enricher ecosystem 数据 + 共现分析，合并去重）
-  5. 增量写入 project_heatmap_data（今天日期的行 + 全量重算 related_data）
+  5. 增量写入 project_heatmap_data（今天日期的行，related_data 只保留在最新一行）
 """
 
 from __future__ import annotations
@@ -327,31 +327,6 @@ def _load_enricher_competitors(sb: Client) -> dict[str, list[dict]]:
     return result
 
 
-def _load_existing_heatmap(sb: Client) -> dict[str, dict]:
-    """加载 project_heatmap_data 中已有的 related_data，用于合并。
-
-    返回: { subject_id: row_dict }
-    """
-    existing: dict[str, dict] = {}
-    page_size = 1000
-    offset = 0
-    while True:
-        resp = (
-            sb.table("project_heatmap_data")
-            .select("subject_id, related_data")
-            .not_.is_("related_data", "null")
-            .range(offset, offset + page_size - 1)
-            .execute()
-        )
-        batch = resp.data or []
-        for r in batch:
-            existing[r["subject_id"]] = r
-        if len(batch) < page_size:
-            break
-        offset += page_size
-    return existing
-
-
 def run_aggregate_projects(sb: Client, today: str) -> dict:
     """Project Heatmap 聚合主入口。
 
@@ -668,31 +643,36 @@ def run_aggregate_projects(sb: Client, today: str) -> dict:
                     except Exception as ee:
                         print(f"    ↳ 单条写入失败 {row['subject_slug']}: {ee}")
 
-    # 6b. 更新所有已有行的 related_data（全量重算）
-    updated_related = 0
-    existing = _load_existing_heatmap(sb)
-    for sid, related in subject_related.items():
-        if sid in existing:
-            try:
-                sb.table("project_heatmap_data").update({
-                    "related_data": related,
-                }).eq("subject_id", sid).execute()
-                updated_related += 1
-            except Exception as e:
-                print(f"  ⚠️ 更新 related_data 失败 {sid}: {e}")
+    # 6b. related_data 只保留在每个 subject 的最新一行（6a 已写入今天的行）。
+    # 旧实现按 subject_id 逐个重写所有历史行，写入量 = subjects × 天数，
+    # 把 free 实例的 IO/磁盘压垮（2026-10-12 事故）。前端取最新非空值，
+    # 这里用一条请求清掉更早日期行上的冗余副本即可。
+    cleared_related = 0
+    if written_today:
+        try:
+            resp = (
+                sb.table("project_heatmap_data")
+                .update({"related_data": None})
+                .lt("snapshot_date", today)
+                .not_.is_("related_data", "null")
+                .execute()
+            )
+            cleared_related = len(resp.data or [])
+        except Exception as e:
+            print(f"  ⚠️ 清理历史 related_data 失败（不影响今天的数据）: {e}")
 
     stats = {
         "subjects_total": len(subjects),
         "tracks_matched": matched_count,
         "mentions_total": len(mentions),
         "rows_written_today": written_today,
-        "related_data_updated": updated_related,
+        "related_data_cleared": cleared_related,
     }
 
     print(
         f"📊 Project Heatmap 完成: subjects={stats['subjects_total']} "
         f"matched={stats['tracks_matched']} "
         f"written_today={stats['rows_written_today']} "
-        f"related_updated={stats['related_data_updated']}"
+        f"related_cleared={stats['related_data_cleared']}"
     )
     return stats
