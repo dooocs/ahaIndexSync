@@ -59,7 +59,30 @@ jobs:
           if [ -n "$OVERRIDE_DATE" ]; then
             ARGS="$ARGS --date $OVERRIDE_DATE"
           fi
-          python main.py $ARGS
+          python -u main.py $ARGS 2>&1 | tee pipeline.log
+        shell: bash
+        timeout-minutes: 150
+
+      - name: Surface log tail as annotations
+        if: ${{ failure() }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path("pipeline.log")
+          lines = p.read_text(errors="replace").splitlines()[-200:] if p.exists() else ["pipeline.log missing"]
+          chunks, cur = [], ""
+          for ln in lines:
+              ln = ln[:500]
+              if len(cur) + len(ln) + 1 > 3500:
+                  chunks.append(cur); cur = ""
+              cur += ln + "\n"
+          chunks.append(cur)
+          chunks = chunks[-9:]
+          esc = lambda s: s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for i, c in enumerate(chunks, 1):
+              print(f"::error title=pipeline log tail {i}/{len(chunks)}::{esc(c)}")
+          PY
 
       - name: Trigger ahaIndex2 dispatch
         if: ${{ inputs.run_mode != 'test' }}
