@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from supabase import create_client
 from dotenv import load_dotenv
 
 from pipeline.config_loader import load_config
@@ -16,10 +15,8 @@ from pipeline.run_tracker import RunTracker
 
 def get_supabase():
     load_dotenv()
-    return create_client(
-        os.environ["SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-    )
+    from infra.db import make_supabase_client
+    return make_supabase_client()
 
 
 def run_pipeline(
