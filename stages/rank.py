@@ -9,10 +9,9 @@ from datetime import date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from supabase import Client
-from openai import OpenAI
 from pipeline.config_loader import PipelineConfig, RankGroupConfig, TagSlotConfig
 from infra.db import table_names, enrich_table_names
-from infra.llm import _model_extra_body, _handle_invalid_temperature
+from infra.llm import _model_extra_body, _handle_invalid_temperature, make_llm_client
 from infra.time_utils import today_str
 
 def _is_valid_display_row(row: dict) -> bool:
@@ -379,7 +378,7 @@ def _score_batch_with_llm(
         candidate_text=candidate_text,
     )
 
-    client = OpenAI(base_url=prompt_cfg.model_base_url, api_key=api_key)
+    client = make_llm_client(prompt_cfg.model_base_url, api_key)
     temperature = prompt_cfg.temperature
     extra_body = _model_extra_body(prompt_cfg.model)
     messages = [

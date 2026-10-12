@@ -8,6 +8,16 @@ import time
 from openai import OpenAI
 from pipeline.config_loader import PromptConfig
 
+# 单次 LLM 请求超时（秒）与 SDK 内部重试次数。openai SDK 默认 600s × 3 次，
+# 上游不响应时单条 item 最多卡 30 分钟。
+LLM_REQUEST_TIMEOUT_S = 60
+LLM_SDK_MAX_RETRIES = 1
+
+
+def make_llm_client(base_url: str, api_key: str, timeout: float = LLM_REQUEST_TIMEOUT_S) -> OpenAI:
+    return OpenAI(base_url=base_url, api_key=api_key, timeout=timeout, max_retries=LLM_SDK_MAX_RETRIES)
+
+
 _MODEL_TEMP_OVERRIDE: dict[str, float] = {}
 _MODEL_TEMP_LOCK = threading.Lock()
 
@@ -77,7 +87,7 @@ def call_llm(
         print("⚠️ LLM API key 未设置")
         return None
 
-    client = OpenAI(base_url=config.model_base_url, api_key=api_key)
+    client = make_llm_client(config.model_base_url, api_key)
     temperature = _resolve_temperature(config.model, config.temperature)
     extra_body = _model_extra_body(config.model)
 
@@ -142,7 +152,7 @@ def call_llm_raw(
     if not api_key:
         return None
 
-    client = OpenAI(base_url=base_url, api_key=api_key)
+    client = make_llm_client(base_url, api_key, timeout=timeout)
     temperature = _resolve_temperature(model, temperature)
     extra_body = _model_extra_body(model)
 

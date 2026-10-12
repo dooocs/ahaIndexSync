@@ -15,14 +15,30 @@ load_dotenv()
 
 _client: Client | None = None
 
+# 单次 PostgREST 请求超时（秒）。supabase-py 默认 120s，数据库卡死时
+# 一次配置读取就要等十几分钟才失败（2026-10-12 事故）。正常查询都是毫秒级。
+SUPABASE_REQUEST_TIMEOUT_S = 30
+
+
+def make_supabase_client() -> Client:
+    try:
+        from supabase import ClientOptions
+    except ImportError:  # 测试里 supabase 模块是桩
+        ClientOptions = None
+    kwargs = {}
+    if ClientOptions is not None:
+        kwargs["options"] = ClientOptions(postgrest_client_timeout=SUPABASE_REQUEST_TIMEOUT_S)
+    return create_client(
+        os.environ["SUPABASE_URL"],
+        os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+        **kwargs,
+    )
+
 
 def get_supabase() -> Client:
     global _client
     if _client is None:
-        _client = create_client(
-            os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-        )
+        _client = make_supabase_client()
     return _client
 
 
