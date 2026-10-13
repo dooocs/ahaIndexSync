@@ -7,10 +7,10 @@ begin
   if current_user <> 'service_role' then
     raise exception 'Server role required' using errcode='42501';
   end if;
-  if p_action not in ('list_meet_posts','meet_post_count','get_meet_post','get_meet_contact','submit_meet_post','withdraw_meet_post','list_meet_photos') then
+  if p_action not in ('list_meet_posts','meet_post_count','get_meet_post','get_public_meet_contact','get_meet_contact','submit_meet_post','withdraw_meet_post','list_meet_photos') then
     raise exception 'Unknown action' using errcode='22023';
   end if;
-  if p_actor is null and p_action not in ('list_meet_posts','meet_post_count','get_meet_post') then
+  if p_actor is null and p_action not in ('list_meet_posts','meet_post_count','get_meet_post','get_public_meet_contact') then
     raise exception 'Login required' using errcode='42501';
   end if;
   -- Transaction-local claims cannot leak across pooled requests. The actor is
@@ -25,6 +25,7 @@ begin
     when 'get_meet_post' then
       select coalesce(jsonb_agg(to_jsonb(p)),'[]'::jsonb) into v_result
         from public.get_meet_post((p_params->>'p_id')::bigint) p;
+    when 'get_public_meet_contact' then v_result := to_jsonb(public.get_public_meet_contact((p_params->>'p_id')::bigint));
     when 'get_meet_contact' then v_result := to_jsonb(public.get_meet_contact((p_params->>'p_id')::bigint));
     when 'withdraw_meet_post' then perform public.withdraw_meet_post(); v_result := 'null'::jsonb;
     when 'list_meet_photos' then
@@ -38,7 +39,8 @@ begin
         p_params->>'p_contact',(p_params->>'p_consent')::boolean,(p_params->>'p_share_contact')::boolean,
         case when jsonb_typeof(p_params->'p_photo_ids')='array' then
           array(select jsonb_array_elements_text(p_params->'p_photo_ids')::uuid) else null end,
-        coalesce((p_params->>'p_public_photos')::boolean,false)));
+        coalesce((p_params->>'p_public_photos')::boolean,false),
+        coalesce((p_params->>'p_public_contact')::boolean,false)));
   end case;
   return v_result;
 end $$;
@@ -59,7 +61,8 @@ begin
     and proname in ('submit_meet_post','submit_meet_post_text','withdraw_meet_post','list_meet_posts',
       'get_meet_post','get_meet_contact','meet_publish_expiry','queue_meet_photo_deletion','reserve_meet_photo',
       'list_meet_photos','meet_post_count','sweep_meet_photos','configure_meet_photo_cleanup','clear_meet_review',
-      'meet_review_snapshot','get_meet_review_post','review_meet_post','meet_api')
+      'meet_review_snapshot','get_meet_review_post','review_meet_post','meet_api',
+      'get_public_meet_contact','meet_contacts_public_guard')
   loop
     execute format('revoke all on function %s from public,anon,authenticated',f);
     execute format('grant execute on function %s to service_role',f);

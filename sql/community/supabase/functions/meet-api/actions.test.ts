@@ -1,7 +1,7 @@
 import { requestAction, requestFailure } from './actions.ts';
 
 Deno.test('public projections and user writes are explicitly allowlisted',()=>{
-  for (const action of ['list_meet_posts','meet_post_count','get_meet_post']) {
+  for (const action of ['list_meet_posts','meet_post_count','get_meet_post','get_public_meet_contact']) {
     if (requestAction({action}).needsUser) throw new Error('Public action requires a user');
   }
   for (const action of ['submit_meet_post','withdraw_meet_post','get_meet_contact']) {

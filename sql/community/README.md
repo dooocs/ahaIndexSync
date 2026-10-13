@@ -90,6 +90,21 @@ terms. Old cached clients do not opt in: the new submission includes an explicit
 `p_public_photos` flag. Redeploy `meet-review` with its six-photo limit as well.
 Run `node --experimental-strip-types --test sql/community/public-photos.test.mjs`.
 
+### Public contact viewing
+
+Apply `010_public_contact.sql` before releasing the public-contact UI. For an
+existing Aliyun instance, generate and run `010_public_contact_aliyun.sql` with
+`node sql/community/build-aliyun-public-contact.mjs`, then redeploy `meet-api`
+(its public allowlist now includes `get_public_meet_contact`).
+
+Only a submission carrying `p_public_contact=true` marks a contact public. A
+trigger recomputes `meet_contacts.public_contact` on every write, so old cached
+clients, edits without the new consent, or any other writer reset it to false.
+`get_public_meet_contact` (anon) returns a contact only for published, unexpired
+posts with `share_contact` and `public_contact`. Posts submitted before this
+migration keep the signed-in-only audience via `get_meet_contact` until their
+author resubmits under the public-contact terms.
+
 Set `COMMUNITY_CLEANUP_SECRET` in Edge secrets, then use the server-only
 `configure_meet_photo_cleanup(secret, url)` RPC to store it in Vault and schedule
 hourly cleanup. This secret must be a cryptographically random string of at least

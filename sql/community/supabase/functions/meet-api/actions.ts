@@ -1,4 +1,4 @@
-const publicActions = new Set(['list_meet_posts','meet_post_count','get_meet_post']);
+const publicActions = new Set(['list_meet_posts','meet_post_count','get_meet_post','get_public_meet_contact']);
 const userActions = new Set(['get_meet_contact','submit_meet_post','withdraw_meet_post']);
 
 export function requestAction(value: unknown): { action: string; params: Record<string,unknown>; needsUser: boolean } {
